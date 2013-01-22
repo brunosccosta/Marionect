@@ -12,13 +12,14 @@ namespace KinectConsole
     {
         KinectSensor kinect = null;
         Skeleton[] skeletonData = null;
+        JointCollection jointCollection = null;
 
         public Kinect()
         {
             startKinectSensor();
         }
 
-        public void startKinectSensor()
+        private void startKinectSensor()
         {
             kinect = KinectSensor.KinectSensors.FirstOrDefault(s => s.Status == KinectStatus.Connected); // Get first Kinect Sensor
             kinect.SkeletonStream.Enable(); // Enable skeletal tracking
@@ -43,18 +44,23 @@ namespace KinectConsole
             }
         }
 
-        public void drawSkeletons()
+        private void drawSkeletons()
         {
             foreach (Skeleton skeleton in this.skeletonData)
             {
                 if (skeleton.TrackingState == SkeletonTrackingState.Tracked)
                 {
-                    drawTrackedSkeletonJoints(skeleton.Joints);
+                    jointCollection = skeleton.Joints;
                 }
             }
         }
 
-        private void drawTrackedSkeletonJoints(JointCollection jointCollection)
+        public JointCollection getJointCollection()
+        {
+            return jointCollection;
+        }
+
+        public void printJointCollection(JointCollection jointCollection)
         {
             Console.WriteLine("Elbow right: <" + jointCollection[JointType.ElbowRight].Position.X + ", " + jointCollection[JointType.ElbowRight].Position.Y + ">");
             Console.WriteLine("Elbow left: <" + jointCollection[JointType.ElbowLeft].Position.X + ", " + jointCollection[JointType.ElbowLeft].Position.Y + ">");
@@ -79,14 +85,14 @@ namespace KinectConsole
             port.Write("A");
         }
 
-        public void turnLedOn()
+        public void servoUp()
         {
-            port.Write("O");
+            port.Write("U");
         }
 
-        public void turnLedOff()
+        public void servoDown()
         {
-            port.Write("F");
+            port.Write("D");
         }
     }
 
@@ -94,15 +100,48 @@ namespace KinectConsole
     {
         static void Main(string[] args)
         {
+            Kinect kinect = new Kinect();
             Arduino arduino = new Arduino();
 
-            while (true)
+            JointCollection jointCollection = null;
+            float[,] baseJoint = new float[4,2];
+
+            baseJoint[0,0] = -10;
+
+            while(true)
             {
-                arduino.turnLedOff();
-                System.Threading.Thread.Sleep(1000);
-                arduino.turnLedOn();
-                System.Threading.Thread.Sleep(1000);
+                jointCollection = kinect.getJointCollection();
+
+                if (jointCollection != null)
+                {
+                    if (baseJoint[0,0] == -10)
+                        kinect.printJointCollection(jointCollection);
+                    else
+                    {
+                        Console.WriteLine("(Base) Elbow right: <" + baseJoint[0,0] + ", " + baseJoint[0,1] + ">");
+                        Console.WriteLine("(Base) Elbow left: <" + baseJoint[1,0] + ", " + baseJoint[1,1] + ">");
+                        Console.WriteLine("(Base) Knee right: <" + baseJoint[2,0] + ", " + baseJoint[2,1] + ">");
+                        Console.WriteLine("(Base) Knee left: <" + baseJoint[3,0] + ", " + baseJoint[3,1] + ">");
+                    }
+
+                    if (Convert.ToChar(Console.Read()) == 'G')
+                    {
+                        baseJoint[0,0] = jointCollection[JointType.ElbowRight].Position.X;
+                        baseJoint[0,1] = jointCollection[JointType.ElbowRight].Position.Y;
+
+                        baseJoint[1,0] = jointCollection[JointType.ElbowLeft].Position.X;
+                        baseJoint[1,1] = jointCollection[JointType.ElbowLeft].Position.Y;
+
+                        baseJoint[2,0] = jointCollection[JointType.KneeRight].Position.X;
+                        baseJoint[2,1] = jointCollection[JointType.KneeRight].Position.Y;
+
+                        baseJoint[3,0] = jointCollection[JointType.KneeLeft].Position.X;
+                        baseJoint[3,1] = jointCollection[JointType.KneeLeft].Position.Y;
+                    }
+                }
             }
         }
+
+
     }
 }
