@@ -21,6 +21,7 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Navigation;
 using System.Windows.Shapes;
+using System.IO.Ports;
 using Microsoft.Kinect;
 
 namespace SkeletalTracking
@@ -37,7 +38,18 @@ namespace SkeletalTracking
 
         KinectSensor kinect;
         Skeleton[] skeletonData = null;
-        Canvas canvas = null;
+        Skeleton[] baseSkeletonData = null;
+
+        Arduino arduino = new Arduino();
+
+        Canvas mainCanvas = null;
+        Canvas baseCanvas = null;
+        Button baseButton = null;
+        TextBlock msgs = null;
+
+        bool calibrado = false;
+        bool calibre = false;
+
         const double mult = -100;
         const double deslocamento = 50;
         const double raio = 8;
@@ -45,6 +57,7 @@ namespace SkeletalTracking
         private void Window_Loaded(object sender, RoutedEventArgs e)
         {
             SetupKinect();
+            SetupUI();
         }
 
         private void SetupKinect()
@@ -53,12 +66,22 @@ namespace SkeletalTracking
             kinect.SkeletonStream.Enable(); // Enable skeletal tracking
 
             skeletonData = new Skeleton[kinect.SkeletonStream.FrameSkeletonArrayLength]; // Allocate ST data
+            baseSkeletonData = new Skeleton[kinect.SkeletonStream.FrameSkeletonArrayLength]; // Allocate ST data
 
             kinect.SkeletonFrameReady += new EventHandler<SkeletonFrameReadyEventArgs>(Kinect_SkeletonFrameReady); // Get Ready for Skeleton Ready Events
 
             kinect.Start(); // Start Kinect sensor
+        }
 
-            canvas = (Canvas)FindName("MainCanvas");
+        private void SetupUI()
+        {
+            mainCanvas = (Canvas)FindName("MainCanvas");
+            baseCanvas = (Canvas)FindName("BaseCanvas");
+
+            baseButton = (Button)FindName("BaseButton");
+            BaseButton.Click += new RoutedEventHandler(BaseButton_Click);
+
+            msgs = (TextBlock)FindName("Msgs");
         }
 
         void Kinect_SkeletonFrameReady(object sender, SkeletonFrameReadyEventArgs e)
@@ -68,45 +91,88 @@ namespace SkeletalTracking
                 if (skeletonFrame != null && this.skeletonData != null) // check that a frame is available
                 {
                     skeletonFrame.CopySkeletonDataTo(this.skeletonData); // get the skeletal information in this frame
+
+                    if (calibre)
+                    {
+                        skeletonFrame.CopySkeletonDataTo(this.baseSkeletonData);
+                        calibre = false;
+                        calibrado = true;
+                    }
                 }
 
-                canvas.Children.Clear();
-                DrawSkeletons();
+                DrawSkeletons(skeletonData, mainCanvas);
+
+                if (calibrado)
+                {
+                    DrawSkeletons(baseSkeletonData, baseCanvas);
+                    CalculateAngles();
+                }
             }
         }
 
-        private void DrawSkeletons()
+        void BaseButton_Click(object sender, RoutedEventArgs e)
         {
-            foreach (Skeleton skeleton in this.skeletonData)
+            calibre = true;
+        }
+
+        private void CalculateAngles()
+        {
+            foreach (Skeleton baseSkeleton in baseSkeletonData)
+            {
+                if (baseSkeleton.TrackingState == SkeletonTrackingState.Tracked)
+                {
+                    // temos o baseSkeleton tracked!
+                    foreach (Skeleton skeleton in skeletonData)
+                    {
+                        if (skeleton.TrackingState == SkeletonTrackingState.Tracked)
+                        {
+                            // temos ambos os esqueletos!
+                            int leftArmAngle = CalculateAngle(skeleton.Joints[JointType.ShoulderLeft].Position, skeleton.Joints[JointType.ElbowLeft].Position, baseSkeleton.Joints[JointType.ShoulderLeft].Position, baseSkeleton.Joints[JointType.ElbowLeft].Position);
+                            int rightArmAngle = CalculateAngle(skeleton.Joints[JointType.ShoulderRight].Position, skeleton.Joints[JointType.ElbowRight].Position, baseSkeleton.Joints[JointType.ShoulderRight].Position, baseSkeleton.Joints[JointType.ElbowRight].Position);
+
+                            msgs.Text = "Left: " + leftArmAngle.ToString() + "; Right: " + rightArmAngle.ToString();
+                            arduino.SetAngleServo(Arduino.LEFT_SERVO, leftArmAngle);
+                            arduino.SetAngleServo(Arduino.RIGHT_SERVO, rightArmAngle);
+                        }
+                    }
+                }
+            }
+        }
+
+        private void DrawSkeletons(Skeleton[] skeletonData, Canvas canvas)
+        {
+            canvas.Children.Clear();
+
+            foreach (Skeleton skeleton in skeletonData)
             {
                 if (skeleton.TrackingState == SkeletonTrackingState.Tracked)
                 {
-                    DrawTrackedSkeletonJoints(skeleton.Joints);
+                    DrawTrackedSkeletonJoints(skeleton.Joints, canvas);
                 }
             }
         }
 
-        private void DrawTrackedSkeletonJoints(JointCollection jointCollection)
+        private void DrawTrackedSkeletonJoints(JointCollection jointCollection, Canvas canvas)
         {
             // Render Head and Shoulders
-            DrawBone(jointCollection[JointType.Head], jointCollection[JointType.ShoulderCenter]);
-            DrawBone(jointCollection[JointType.ShoulderCenter], jointCollection[JointType.ShoulderLeft]);
-            DrawBone(jointCollection[JointType.ShoulderCenter], jointCollection[JointType.ShoulderRight]);
+            DrawBone(jointCollection[JointType.Head], jointCollection[JointType.ShoulderCenter], canvas);
+            DrawBone(jointCollection[JointType.ShoulderCenter], jointCollection[JointType.ShoulderLeft], canvas);
+            DrawBone(jointCollection[JointType.ShoulderCenter], jointCollection[JointType.ShoulderRight], canvas);
 
             // Render Left Arm
-            DrawBone(jointCollection[JointType.ShoulderLeft], jointCollection[JointType.ElbowLeft]);
-            DrawBone(jointCollection[JointType.ElbowLeft], jointCollection[JointType.WristLeft]);
-            DrawBone(jointCollection[JointType.WristLeft], jointCollection[JointType.HandLeft]);
+            DrawBone(jointCollection[JointType.ShoulderLeft], jointCollection[JointType.ElbowLeft], canvas);
+            DrawBone(jointCollection[JointType.ElbowLeft], jointCollection[JointType.WristLeft], canvas);
+            DrawBone(jointCollection[JointType.WristLeft], jointCollection[JointType.HandLeft], canvas);
 
             // Render Right Arm
-            DrawBone(jointCollection[JointType.ShoulderRight], jointCollection[JointType.ElbowRight]);
-            DrawBone(jointCollection[JointType.ElbowRight], jointCollection[JointType.WristRight]);
-            DrawBone(jointCollection[JointType.WristRight], jointCollection[JointType.HandRight]);
+            DrawBone(jointCollection[JointType.ShoulderRight], jointCollection[JointType.ElbowRight], canvas);
+            DrawBone(jointCollection[JointType.ElbowRight], jointCollection[JointType.WristRight], canvas);
+            DrawBone(jointCollection[JointType.WristRight], jointCollection[JointType.HandRight], canvas);
 
             // Render other bones...
         }
 
-        private void DrawBone(Joint jointFrom, Joint jointTo)
+        private void DrawBone(Joint jointFrom, Joint jointTo, Canvas canvas)
         {
             if (jointFrom.TrackingState == JointTrackingState.NotTracked ||
             jointTo.TrackingState == JointTrackingState.NotTracked)
@@ -123,14 +189,14 @@ namespace SkeletalTracking
             if (jointFrom.TrackingState == JointTrackingState.Tracked &&
             jointTo.TrackingState == JointTrackingState.Tracked)
             {
-                DrawTrackedBoneLine(jointFrom.Position, jointTo.Position);  // Draw bold lines if the joints are both tracked
+                DrawTrackedBoneLine(jointFrom.Position, jointTo.Position, canvas);  // Draw bold lines if the joints are both tracked
             }
         }
 
-        private void DrawTrackedBoneLine(SkeletonPoint from, SkeletonPoint to)
+        private void DrawTrackedBoneLine(SkeletonPoint from, SkeletonPoint to, Canvas canvas)
         {
-            DrawJoint(from);
-            DrawJoint(to);
+            DrawJoint(from, canvas);
+            DrawJoint(to, canvas);
 
             Line line = new Line();
 
@@ -147,7 +213,7 @@ namespace SkeletalTracking
             canvas.Children.Add(line);
         }
 
-        private void DrawJoint(SkeletonPoint joint)
+        private void DrawJoint(SkeletonPoint joint, Canvas canvas)
         {
             Ellipse e = new Ellipse();
             e.Width = raio;
@@ -160,6 +226,18 @@ namespace SkeletalTracking
             canvas.Children.Add(e);
         }
 
+        private int CalculateAngle(SkeletonPoint origem, SkeletonPoint destino, SkeletonPoint baseOrigem, SkeletonPoint baseDestino)
+        {
+            Vector skeletonVector = new Vector(destino.X - origem.X, destino.Y - origem.Y);
+            Vector baseVector = new Vector(baseDestino.X - baseOrigem.X, baseDestino.Y - baseOrigem.Y);
+
+            skeletonVector.Normalize();
+            baseVector.Normalize();
+
+            double angle = Vector.AngleBetween(baseVector, skeletonVector);
+            return (int) Math.Round(Math.Abs(angle));
+        }
+
         private double FixPointPosition(double p)
         {
             return p * mult + deslocamento;
@@ -168,6 +246,26 @@ namespace SkeletalTracking
         private void Window_Closed(object sender, EventArgs e)
         {
             //Cleanup
+        }
+    }
+
+    class Arduino
+    {
+        public const char LEFT_SERVO = 'L';
+        public const char RIGHT_SERVO = 'R';
+
+        SerialPort port = null;
+
+        public Arduino()
+        {
+            port = new SerialPort("COM3", 9600);
+            port.Open();
+        }
+
+        public void SetAngleServo(char motor, int angle)
+        {
+            String stringAngle = "#" + motor.ToString() + angle.ToString() + "#";
+            port.Write(stringAngle);
         }
     }
 }
